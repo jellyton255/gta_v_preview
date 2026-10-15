@@ -69,23 +69,34 @@ export const window = {
     new Promise<Uri[] | undefined>((resolve) => {
       const input = document.createElement('input');
       input.type = 'file';
+      input.multiple = true;
       input.onchange = async () => {
-        const f = input.files?.[0];
-        if (!f) return resolve(undefined);
-        const path = `/__mem__/${f.name}`;
-        memory.set(path, new Uint8Array(await f.arrayBuffer()));
-        resolve([Uri.file(path)]);
+        const files = [...(input.files ?? [])];
+        if (!files.length) return resolve(undefined);
+        for (const f of files) memory.set(`/__mem__/${f.name}`, new Uint8Array(await f.arrayBuffer()));
+        resolve(files.map((f) => Uri.file(`/__mem__/${f.name}`)));
       };
       input.click();
     }),
+  showInformationMessage: async (m: string) => console.log(`[harness] ${m}`),
+  /** Picks by typing comma-separated labels. */
+  showQuickPick: async (items: { label: string }[], o?: { title?: string }) => {
+    const typed = globalThis.prompt(`${o?.title ?? 'Pick'}: ${items.map((i) => i.label).join(', ')}`);
+    const wanted = new Set((typed ?? '').split(',').map((x) => x.trim()));
+    return items.filter((i) => wanted.has(i.label));
+  },
+  showInputBox: async (o: { title?: string; value?: string; validateInput?: (v: string) => string | undefined }) => {
+    const v = globalThis.prompt(o.title ?? '', o.value ?? '');
+    return v === null || o.validateInput?.(v) ? undefined : v;
+  },
   showSaveDialog: async (o: { defaultUri?: Uri }) => Uri.file(`/__mem__/${o.defaultUri?.path.split('/').pop() ?? 'export'}`),
   registerCustomEditorProvider: () => noop,
 };
 /** Test hook: lets automated checks inject a picked file without a dialog. */
-(globalThis as unknown as { __harnessPick?: (name: string, data: Uint8Array) => void }).__harnessPick = (name, data) => {
-  const path = `/__mem__/${name}`;
-  memory.set(path, data);
-  window.showOpenDialog = async () => [Uri.file(path)];
+(globalThis as unknown as { __harnessPick?: (name: string, data: Uint8Array, ...more: [string, Uint8Array][]) => void }).__harnessPick = (name, data, ...more) => {
+  const files: [string, Uint8Array][] = [[name, data], ...more];
+  for (const [n, d] of files) memory.set(`/__mem__/${n}`, d);
+  window.showOpenDialog = async () => files.map(([n]) => Uri.file(`/__mem__/${n}`));
 };
 (globalThis as unknown as { __harnessMemory?: Map<string, Uint8Array> }).__harnessMemory = memory;
 export const commands = {

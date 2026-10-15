@@ -5,6 +5,7 @@ import { ENCODABLE_FORMATS, encodeLevel, encodeMipChain, isBlockFormat, isEncoda
 import { decodeBc7 } from './bc7';
 import { canvasToRgba, ddsTopRgba, decodeImage, LoadedImage, resizeCanvas, rgbaCanvas, rgbaToPng } from './imageUtils';
 import { h, hostRequest, newRequestId } from './ui';
+import { deleteTexturesFrom, renameTextureIn } from './ytdEditing';
 
 /**
  * Texture replacement, conversion and export. Changes are first shown as a
@@ -80,10 +81,11 @@ function rawUsable(source: LoadedImage | undefined, s: Settings): boolean {
 }
 
 /**
- * Builds the action bar (Replace / Size / Format / Mips / Save / Revert / Export)
- * for a texture. `show` is called with the texture to display whenever it changes.
+ * Builds the action bar (Replace / Size / Format / Mips / Save / Revert / Export,
+ * plus Rename / Delete in a .ytd) for a texture. `show` is called with the
+ * texture to display whenever it changes; `close` closes the viewer.
  */
-export function editActions(target: EditTarget, show: (t: TextureData) => void): HTMLElement {
+export function editActions(target: EditTarget, show: (t: TextureData) => void, close: () => void): HTMLElement {
   const t = target.original;
   const status = h('span', { class: 'muted edit-status' });
   const sizeInfo = h('span', { class: 'muted small' });
@@ -100,6 +102,8 @@ export function editActions(target: EditTarget, show: (t: TextureData) => void):
   const revert = h('button', { class: 'chip', title: 'Discard the change' }, 'Revert');
   const png = h('button', { class: 'chip', title: 'Export as PNG (the preview if there is one, otherwise the original)' }, 'Export PNG');
   const dds = h('button', { class: 'chip', title: 'Export as DDS with the chosen size, format and mips (the original data if nothing is changed)' }, 'Export DDS');
+  const rename = h('button', { class: 'chip', title: 'Rename this texture in the .ytd' }, 'Rename…');
+  const remove = h('button', { class: 'chip', title: 'Delete this texture from the .ytd' }, 'Delete');
   if (!t.origin) {
     for (const b of [replace, sizeSelect, formatSelect, mipsSelect, png, dds]) {
       b.disabled = true;
@@ -304,6 +308,24 @@ export function editActions(target: EditTarget, show: (t: TextureData) => void):
     }
   };
 
+  rename.onclick = async () => {
+    const result = await renameTextureIn(t.origin!, t.name);
+    if (result.ok) {
+      pending.delete(keyOf(t));
+      close();
+    }
+    say(result.text);
+  };
+
+  remove.onclick = async () => {
+    const result = await deleteTexturesFrom(t.origin!, [t.name]);
+    if (result.ok) {
+      pending.delete(keyOf(t));
+      close();
+    }
+    say(result.text);
+  };
+
   sizeSelect.onchange = formatSelect.onchange = mipsSelect.onchange = () => void onSettingsChange();
   revert.onclick = () => revertEdit();
 
@@ -403,6 +425,7 @@ export function editActions(target: EditTarget, show: (t: TextureData) => void):
     h('span', { class: 'sep' }),
     png,
     dds,
+    ...(inYtd ? [h('span', { class: 'sep' }), rename, remove] : []),
     h('div', { class: 'edit-info' }, sizeInfo, status)
   );
 }

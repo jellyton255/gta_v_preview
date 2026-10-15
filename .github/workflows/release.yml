@@ -53,9 +53,9 @@ jobs:
           else
             gh release create "$TAG" "$VSIX" \
               --title "$TAG" \
-              --notes "Install from the VS Code Marketplace (\`ncss-ltd.gta-v-asset-preview\`), Open VSX, or download \`$VSIX\` below and use Extensions → \`...\` → **Install from VSIX...**.
+              --notes "Download \`$VSIX\` below and use Extensions → \`...\` → **Install from VSIX...**.
 
-          See the [changelog](https://github.com/MartinNelsonNCSS/gta_v_preview/blob/main/CHANGELOG.md) for what's new."
+          See the [changelog](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md) for what's new."
           fi
 
       - name: Publish to VS Code Marketplace

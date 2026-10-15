@@ -15,7 +15,7 @@ export async function run(): Promise<void> {
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
   await check('extension activates', async () => {
-    const ext = vscode.extensions.getExtension('ncss-ltd.gta-v-asset-preview');
+    const ext = vscode.extensions.getExtension('everfall.gta-v-asset-preview');
     if (!ext) throw new Error('extension not found');
     await ext.activate();
     return `v${ext.packageJSON.version}`;

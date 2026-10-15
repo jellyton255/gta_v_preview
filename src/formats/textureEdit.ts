@@ -6,6 +6,7 @@ import { encodeMipChain, isBlockFormat, isEncodable, maxMipLevels, mipLevelsFor 
 import { packSegment } from './resourceBuilder';
 import { fragmentDrawables } from './yft';
 import { buildDds } from './dds';
+import { joaat } from './hash';
 import type { TextureData } from '../shared/model';
 
 /**
@@ -228,6 +229,36 @@ function withHeader(header: Uint8Array, compressed: Uint8Array): Uint8Array {
   return out;
 }
 
+/** One texture of a .ytd being written: its 0x90-byte struct plus its pixel data. */
+interface YtdEntry {
+  name: string;
+  struct: Uint8Array;
+  format: string;
+  width: number;
+  height: number;
+  levels: number;
+  data: Uint8Array;
+  /** Size/format fields must be rewritten (the data changed shape, or the texture is new). */
+  reshaped: boolean;
+}
+
+/** The textures of a .ytd as rebuild entries, with their exact bytes. */
+function ytdEntries(r: ResourceReader): YtdEntry[] {
+  return dictionaryTextures(r, ROOT).map((loc) => {
+    const t = rawTexture(r, loc);
+    return {
+      name: loc.name,
+      struct: r.bytes(loc.ptr, 0x90).slice(),
+      format: t.formatName,
+      width: t.width,
+      height: t.height,
+      levels: t.levels,
+      data: r.bytes(t.dataPtr, t.size).slice(),
+      reshaped: false,
+    };
+  });
+}
+
 /**
  * Rebuilds a .ytd from scratch with some textures' data replaced (keyed by
  * lower-case name). Other textures keep their exact bytes; structures are
@@ -235,24 +266,98 @@ function withHeader(header: Uint8Array, compressed: Uint8Array): Uint8Array {
  * page layout fits the new data, so memory use shrinks when textures do.
  */
 export function rebuildYtd(file: Uint8Array, r: ResourceReader, changes: Map<string, TextureChange>): Uint8Array {
-  const hashes = r.list(ROOT + 0x20);
-  const list = r.list(ROOT + 0x30);
-  const entries = r.ptrArray(list.items, list.count).map((ptr, i) => {
-    const loc = { ptr, name: r.string(r.ptr(ptr + 0x28)) ?? '' };
-    const t = rawTexture(r, loc);
-    const change = changes.get(loc.name.toLowerCase());
-    return {
-      name: loc.name,
-      hash: r.u32(hashes.items + i * 4),
-      struct: r.bytes(ptr, 0x90).slice(),
-      format: change ? change.format : t.formatName,
-      width: change ? change.width : t.width,
-      height: change ? change.height : t.height,
-      levels: change ? change.levels : t.levels,
-      data: change ? change.data : r.bytes(t.dataPtr, t.size).slice(),
-      replaced: !!change,
-    };
+  const entries = ytdEntries(r).map((e) => {
+    const change = changes.get(e.name.toLowerCase());
+    return change ? { ...e, ...change, reshaped: true } : e;
   });
+  return writeYtd(file, r, entries);
+}
+
+/** Returns a copy of a .ytd without the named textures. */
+export function deleteTextures(file: Uint8Array, names: string[]): Uint8Array {
+  const r = new ResourceReader(readRsc7(file));
+  const entries = ytdEntries(r);
+  const remove = new Set(names.map((n) => n.toLowerCase()));
+  const missing = names.filter((n) => !entries.some((e) => e.name.toLowerCase() === n.toLowerCase()));
+  if (missing.length) throw new ResourceError(`Not in this texture dictionary: ${missing.join(', ')}.`);
+  if (remove.size >= entries.length) throw new ResourceError('A texture dictionary needs at least one texture; delete the .ytd file instead.');
+  return writeYtd(file, r, entries.filter((e) => !remove.has(e.name.toLowerCase())));
+}
+
+/** Returns a copy of a .ytd with texture `name` renamed to `newName`. */
+export function renameTexture(file: Uint8Array, name: string, newName: string): Uint8Array {
+  const r = new ResourceReader(readRsc7(file));
+  const entries = ytdEntries(r);
+  const entry = entries.find((e) => e.name.toLowerCase() === name.toLowerCase());
+  if (!entry) throw new ResourceError(`Texture "${name}" was not found in this file.`);
+  checkTextureName(newName, entries.filter((e) => e !== entry));
+  entry.name = newName;
+  return writeYtd(file, r, entries);
+}
+
+/** A texture to add to a .ytd. */
+export interface NewTexture extends ReplacementImage {
+  name: string;
+}
+
+/**
+ * Returns a copy of a .ytd with new textures added. Each is encoded like a
+ * replacement (default format DXT5 with a full mip chain), and gets a fresh
+ * texture structure like CodeWalker writes for imported textures.
+ */
+export function addTextures(file: Uint8Array, textures: NewTexture[]): Uint8Array {
+  const r = new ResourceReader(readRsc7(file));
+  const entries = ytdEntries(r);
+  for (const t of textures) {
+    checkTextureName(t.name, entries);
+    const format = t.format ?? 'DXT5';
+    const { levels, data } = encodeImage(t, format, isEncodable(format) ? mipLevelsFor(format, t.width, t.height) : 1);
+    entries.push({ name: t.name, struct: newTextureStruct(), format, width: t.width, height: t.height, levels, data, reshaped: true });
+  }
+  return writeYtd(file, r, entries);
+}
+
+/** Throws unless `name` is a usable texture name not already in `existing`. */
+function checkTextureName(name: string, existing: { name: string }[]): void {
+  if (!/^[\x21-\x7e]+$/.test(name)) throw new ResourceError(`"${name}" isn't a valid texture name; use letters, digits and symbols like _ or -, without spaces.`);
+  if (existing.some((e) => e.name.toLowerCase() === name.toLowerCase())) throw new ResourceError(`This texture dictionary already has a texture named "${name}".`);
+}
+
+/** Encodes (or checks) an image's data for `format`, returning the mip count used. */
+function encodeImage(image: ReplacementImage, format: string, defaultLevels: number): { levels: number; data: Uint8Array } {
+  const { width, height } = image;
+  const code = formatCode(format);
+  if (code === undefined) throw new ResourceError(`Unknown texture format ${format}.`);
+  if (isBlockFormat(format) && (width % 4 || height % 4)) throw new ResourceError(`${format} textures need a width and height that are multiples of 4.`);
+  const levels = image.levels ?? defaultLevels;
+  if (levels < 1 || levels > maxMipLevels(width, height)) throw new ResourceError(`A ${width}×${height} texture can have 1–${maxMipLevels(width, height)} mip levels (got ${levels}).`);
+  const expected = textureDataSize(code, width, height, levels)!;
+  if (image.encoded) {
+    if (image.encoded.length < expected) throw new ResourceError(`The supplied ${format} data is too short for ${width}×${height} with ${levels} mips.`);
+    return { levels, data: image.encoded.subarray(0, expected) };
+  }
+  if (!isEncodable(format)) throw new ResourceError(`Encoding ${format} isn't supported; choose another format, or use a ${format} .dds.`);
+  if (!image.rgba || image.rgba.length !== width * height * 4) throw new ResourceError('Image data does not match its size.');
+  return { levels, data: encodeMipChain(format, image.rgba, width, height, levels) };
+}
+
+/** A blank grcTexture with CodeWalker's defaults; size and format fields are filled in when written. */
+function newTextureStruct(): Uint8Array {
+  const struct = new Uint8Array(0x90);
+  const v = new DataView(struct.buffer);
+  v.setUint32(0x04, 1, true);
+  v.setUint16(0x30, 1, true);
+  v.setUint16(0x54, 1, true); // depth
+  return struct;
+}
+
+/**
+ * Writes a .ytd containing `entries`, with a fresh page layout. The dictionary
+ * header is copied from the original; textures are sorted by name hash, which
+ * the game relies on to look them up.
+ */
+function writeYtd(file: Uint8Array, r: ResourceReader, unsorted: YtdEntry[]): Uint8Array {
+  const entries = unsorted.map((e) => ({ ...e, hash: joaat(e.name) })).sort((a, b) => a.hash - b.hash);
   const n = entries.length;
 
   // Graphics: one block per texture (all mips).
@@ -297,7 +402,7 @@ export function rebuildYtd(file: Uint8Array, r: ResourceReader, changes: Map<str
     setPtr(structOff(i) + 0x28, SYS + nameOff(i));
     system.set(nameBytes[i], nameOff(i));
     graphics.set(e.data, gfx.offsets[i]);
-    if (e.replaced) {
+    if (e.reshaped) {
       writeTextureHeader(struct, e.format, e.width, e.height, e.levels, GFX + gfx.offsets[i]);
     } else {
       setPtr(structOff(i) + 0x70, GFX + gfx.offsets[i]);

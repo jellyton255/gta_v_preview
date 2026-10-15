@@ -20,13 +20,10 @@ Remote/WSL, and in vscode.dev.
 
 ## Install
 
-- **VS Code:** search for "GTA V Asset Preview" in the Extensions view, or install
-  [`ncss-ltd.gta-v-asset-preview`](https://marketplace.visualstudio.com/items?itemName=ncss-ltd.gta-v-asset-preview)
-  from the Marketplace.
-- **Cursor, VSCodium, Windsurf and other forks:** install it from
-  [Open VSX](https://open-vsx.org/extension/ncss-ltd/gta-v-asset-preview).
-- **Manually:** download the `.vsix` from the [releases page](https://github.com/MartinNelsonNCSS/gta_v_preview/releases),
-  then use **Extensions → ··· → Install from VSIX…**.
+This is Everfall's fork of [GTA V Asset Preview](https://github.com/MartinNelsonNCSS/gta_v_preview), with `.ytd` texture
+management added. It isn't on the Marketplace or Open VSX. Download the `.vsix` from the
+[releases page](https://github.com/jellyton255/gta_v_preview/releases), uninstall the original extension if you have it,
+then use **Extensions → ··· → Install from VSIX…**.
 
 ## Usage
 
@@ -68,6 +65,16 @@ Open any `.ydr`, `.ydd`, `.yft`, `.ytyp`, `.ymap`, `.ymt`, `.ybn`, `.ytd` or `.y
     `<file>.bak`.
   - **Revert** discards an unsaved change. **Export PNG** / **Export DDS** save the texture: DDS exports the exact
     original data, or, when you've changed size/format/mips, a DDS encoded with those settings.
+- **Managing texture dictionaries (`.ytd`)**: besides replacing, you can add, delete and rename textures.
+  - **Add Textures…** (in the `.ytd` toolbar) picks one or more PNG/JPG/WebP/BMP/GIF/DDS files and adds each as a new
+    texture named after its file. A `.dds` keeps its own format, size and mipmaps. Other images are resized to the
+    nearest power of two and stored as DXT1 (fully opaque) or DXT5 (with transparency) with a full mip chain; open the
+    texture afterwards to change its size, format or mips.
+  - **Delete Textures…** (in the toolbar) lets you pick several textures to delete at once. A dictionary needs at least
+    one texture, so delete the file itself to remove them all.
+  - In the texture viewer, **Rename…** and **Delete** act on that texture. Models find textures by name, so update any
+    model that used an old name.
+  - Every change asks for confirmation, and the first time a file is changed the original is kept as `<file>.bak`.
 - **Converting images to DDS**: right-click one or more PNG/JPG/WebP/BMP/GIF/DDS files in the Explorer and choose
   **Convert to DDS…** (or run **GTA V: Convert to DDS…** from the command palette). Pick the format (DXT1, DXT5, ...),
   mipmaps (full chain, down to 4×4, or none) and size (original, nearest power of two, or a maximum), check the
