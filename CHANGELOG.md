@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.11.0
+
+- **Manage texture dictionaries (`.ytd`)**: add, delete and rename textures, not just replace them.
+  - **Add Textures…** in the `.ytd` toolbar adds any number of PNG/JPG/WebP/BMP/GIF/DDS files as new textures, named after their files.
+  - **Delete Textures…** picks several textures to delete at once; the viewer also has **Rename…** and **Delete** for a single texture.
+  - The `.ytd` is rebuilt with textures sorted by name hash (as the game expects), and the first original is kept as `<file>.bak`.
+
 ## 0.10.0
 
 - **Animation preview (`.ycd`)**: play, pause, step and scrub clips, with speed, looping and root motion.

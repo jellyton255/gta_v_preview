@@ -86,7 +86,7 @@ export function openLightbox(t: TextureData, source?: string, edit?: EditTarget)
     window.removeEventListener('keydown', onKey);
   };
   const onKey = (e: KeyboardEvent) => e.key === 'Escape' && close();
-  const actions = edit ? editActions(edit, (next) => ((shown = next), render())) : null;
+  const actions = edit ? editActions(edit, (next) => ((shown = next), render()), close) : null;
   const overlay = h(
     'div',
     { class: 'lightbox', onclick: (e: Event) => e.target === overlay && close() },

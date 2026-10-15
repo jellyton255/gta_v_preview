@@ -352,6 +352,9 @@ export type HostToWebview =
   | { type: 'fullTexture'; requestId: number; texture?: TextureData; error?: string }
   | { type: 'textureReplaced'; requestId: number; ok: boolean; cancelled?: boolean; error?: string; file?: string }
   | { type: 'saved'; requestId: number; path?: string; cancelled?: boolean; error?: string }
+  | { type: 'pickedImages'; requestId: number; files: { name: string; data: Uint8Array }[] }
+  /** Result of adding, deleting or renaming textures in a .ytd (the view reloads on its own). */
+  | { type: 'ytdEdited'; requestId: number; ok: boolean; cancelled?: boolean; error?: string }
   /** Images to convert in the DDS converter panel. */
   | { type: 'converterFiles'; files: { name: string; uri: string; data: Uint8Array }[] }
   | { type: 'converted'; requestId: number; ok: boolean; path?: string; skipped?: boolean; replaceAll?: boolean; error?: string }
@@ -381,6 +384,17 @@ export type HostToWebview =
   | { type: 'error'; message: string }
   | { type: 'status'; message: string };
 
+/** A texture to add to a .ytd: RGBA pixels to encode, or `encoded` data (all `levels` mips) to store as-is. */
+export interface NewTextureImage {
+  name: string;
+  width: number;
+  height: number;
+  format: string;
+  levels?: number;
+  rgba?: Uint8Array;
+  encoded?: Uint8Array;
+}
+
 export type WebviewToHost =
   | { type: 'ready' }
   | { type: 'findTextures'; requestId: number; names: string[]; hints: string[]; maxSize?: number }
@@ -393,6 +407,14 @@ export type WebviewToHost =
   | { type: 'openAsText' }
   /** Opens a file picker for a replacement image (PNG/JPG/DDS...). */
   | { type: 'pickImage'; requestId: number }
+  /** Opens a file picker for any number of images to add to a .ytd. */
+  | { type: 'pickImages'; requestId: number }
+  /** Adds textures to the .ytd at `origin`, after confirmation. */
+  | { type: 'addTextures'; requestId: number; origin: string; textures: NewTextureImage[] }
+  /** Deletes textures from the .ytd at `origin`; without `names`, the user picks them from a list. */
+  | { type: 'deleteTextures'; requestId: number; origin: string; names?: string[] }
+  /** Renames a texture in the .ytd at `origin`, asking the user for the new name. */
+  | { type: 'renameTexture'; requestId: number; origin: string; name: string }
   /** Full-resolution texture from the file at `origin`. */
   | { type: 'getFullTexture'; requestId: number; origin: string; name: string }
   /** Writes `rgba` (exactly the texture's size) into the file at `origin`, after confirmation. */

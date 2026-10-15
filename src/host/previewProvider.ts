@@ -10,7 +10,7 @@ import { parseYmt } from '../formats/ymt';
 import { parseYcd } from '../formats/ycd';
 import { isPedAnimation } from '../formats/pedSkeleton';
 import { isEncrypted } from '../formats/scan';
-import { exportDds, readFullTexture, replaceTexture, TextureFileKind } from '../formats/textureEdit';
+import { addTextures, deleteTextures, exportDds, readFullTexture, renameTexture, replaceTexture, TextureFileKind } from '../formats/textureEdit';
 import type {
   AnimTarget,
   ArchetypeData,
@@ -167,6 +167,18 @@ class PreviewSession {
           break;
         case 'pickImage':
           await this.pickImage(message.requestId);
+          break;
+        case 'pickImages':
+          await this.pickImages(message.requestId);
+          break;
+        case 'addTextures':
+          await this.addTextures(message);
+          break;
+        case 'deleteTextures':
+          await this.deleteTextures(message);
+          break;
+        case 'renameTexture':
+          await this.renameTexture(message);
           break;
         case 'getFullTexture':
           await this.getFullTexture(message.requestId, message.origin, message.name);
@@ -536,17 +548,100 @@ class PreviewSession {
         rgba: m.rgba,
         encoded: m.encoded,
       });
-      // Keep the first original as a backup; later saves don't overwrite it.
-      const backup = uri.with({ path: `${uri.path}.bak` });
-      try {
-        await vscode.workspace.fs.stat(backup);
-      } catch {
-        await vscode.workspace.fs.writeFile(backup, original);
-      }
-      await vscode.workspace.fs.writeFile(uri, updated);
+      await writeWithBackup(uri, original, updated);
       this.post({ type: 'textureReplaced', requestId: m.requestId, ok: true, file });
     } catch (err) {
       this.post({ type: 'textureReplaced', requestId: m.requestId, ok: false, error: (err as Error).message });
+    }
+  }
+
+  private async pickImages(requestId: number): Promise<void> {
+    const picked = await vscode.window.showOpenDialog({
+      canSelectMany: true,
+      openLabel: 'Add to Dictionary',
+      defaultUri: dirname(this.uri),
+      filters: { Images: ['png', 'jpg', 'jpeg', 'webp', 'bmp', 'gif', 'dds'] },
+    });
+    const files = await Promise.all((picked ?? []).map(async (uri) => ({ name: basename(uri), data: await vscode.workspace.fs.readFile(uri) })));
+    this.post({ type: 'pickedImages', requestId, files });
+  }
+
+  /** Resolves the .ytd a dictionary edit applies to (adding, deleting and renaming need a .ytd). */
+  private async ytdFile(origin: string): Promise<vscode.Uri> {
+    const { uri, kind } = await this.textureFile(origin);
+    if (kind !== 'ytd') throw new Error(`Textures can only be added, deleted or renamed in a .ytd, not a .${kind}.`);
+    return uri;
+  }
+
+  private async addTextures(m: Extract<WebviewToHost, { type: 'addTextures' }>): Promise<void> {
+    try {
+      const uri = await this.ytdFile(m.origin);
+      const file = basename(uri);
+      const list = m.textures.map((t) => `${t.name} (${t.width}×${t.height} ${t.format})`).join('\n');
+      const choice = await vscode.window.showWarningMessage(
+        m.textures.length === 1 ? `Add Texture "${m.textures[0].name}" to ${file}?` : `Add ${m.textures.length} Textures to ${file}?`,
+        { modal: true, detail: `${list}\n\nThe original file is kept as ${file}.bak.` },
+        'Add'
+      );
+      if (choice !== 'Add') return this.post({ type: 'ytdEdited', requestId: m.requestId, ok: false, cancelled: true });
+      const original = await vscode.workspace.fs.readFile(uri);
+      await writeWithBackup(uri, original, addTextures(original, m.textures));
+      const what = m.textures.length === 1 ? `"${m.textures[0].name}"` : `${m.textures.length} textures`;
+      this.edited(m.requestId, `Added ${what} to ${file}.`);
+    } catch (err) {
+      this.post({ type: 'ytdEdited', requestId: m.requestId, ok: false, error: (err as Error).message });
+    }
+  }
+
+  private async deleteTextures(m: Extract<WebviewToHost, { type: 'deleteTextures' }>): Promise<void> {
+    try {
+      const uri = await this.ytdFile(m.origin);
+      const file = basename(uri);
+      const original = await vscode.workspace.fs.readFile(uri);
+      let names = m.names;
+      if (!names) {
+        const picked = await vscode.window.showQuickPick(
+          listYtdTextureNames(original).sort((a, b) => a.localeCompare(b)).map((label) => ({ label })),
+          { canPickMany: true, title: `Delete Textures from ${file}`, placeHolder: 'Pick the textures to delete' }
+        );
+        names = picked?.map((p) => p.label) ?? [];
+        if (!names.length) return this.post({ type: 'ytdEdited', requestId: m.requestId, ok: false, cancelled: true });
+      }
+      const choice = await vscode.window.showWarningMessage(
+        names.length === 1 ? `Delete Texture "${names[0]}" from ${file}?` : `Delete ${names.length} Textures from ${file}?`,
+        { modal: true, detail: `${names.join('\n')}\n\nThe original file is kept as ${file}.bak.` },
+        'Delete'
+      );
+      if (choice !== 'Delete') return this.post({ type: 'ytdEdited', requestId: m.requestId, ok: false, cancelled: true });
+      await writeWithBackup(uri, original, deleteTextures(original, names));
+      const what = names.length === 1 ? `"${names[0]}"` : `${names.length} textures`;
+      this.edited(m.requestId, `Deleted ${what} from ${file}.`);
+    } catch (err) {
+      this.post({ type: 'ytdEdited', requestId: m.requestId, ok: false, error: (err as Error).message });
+    }
+  }
+
+  /** Reports a saved dictionary edit; the view reloads from the file watcher, so the message is shown by VS Code. */
+  private edited(requestId: number, message: string): void {
+    void vscode.window.showInformationMessage(message);
+    this.post({ type: 'ytdEdited', requestId, ok: true });
+  }
+
+  private async renameTexture(m: Extract<WebviewToHost, { type: 'renameTexture' }>): Promise<void> {
+    try {
+      const uri = await this.ytdFile(m.origin);
+      const newName = await vscode.window.showInputBox({
+        title: `Rename Texture "${m.name}"`,
+        value: m.name,
+        prompt: 'Models find textures by name, so update any model that uses the old name.',
+        validateInput: (v) => (/^[\x21-\x7e]+$/.test(v) ? undefined : 'Use letters, digits and symbols like _ or -, without spaces.'),
+      });
+      if (!newName || newName === m.name) return this.post({ type: 'ytdEdited', requestId: m.requestId, ok: false, cancelled: true });
+      const original = await vscode.workspace.fs.readFile(uri);
+      await writeWithBackup(uri, original, renameTexture(original, m.name, newName));
+      this.edited(m.requestId, `Renamed "${m.name}" to "${newName}".`);
+    } catch (err) {
+      this.post({ type: 'ytdEdited', requestId: m.requestId, ok: false, error: (err as Error).message });
     }
   }
 
@@ -587,6 +682,17 @@ class PreviewSession {
     const kind = ({ ydr: 'drawable', ydd: 'dictionary', yft: 'fragment', ytd: 'ytd' } as const)[ext];
     await vscode.commands.executeCommand('vscode.openWith', file.uri, VIEW_TYPES[kind]);
   }
+}
+
+/** Writes an edited resource, keeping the first original as `<file>.bak` (later saves don't overwrite it). */
+async function writeWithBackup(uri: vscode.Uri, original: Uint8Array, updated: Uint8Array): Promise<void> {
+  const backup = uri.with({ path: `${uri.path}.bak` });
+  try {
+    await vscode.workspace.fs.stat(backup);
+  } catch {
+    await vscode.workspace.fs.writeFile(backup, original);
+  }
+  await vscode.workspace.fs.writeFile(uri, updated);
 }
 
 function tagOrigin(textures: TextureData[], uri: vscode.Uri): TextureData[] {

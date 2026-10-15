@@ -1,23 +1,23 @@
 {
   "name": "gta-v-asset-preview",
-  "displayName": "GTA V Asset Preview",
+  "displayName": "GTA V Asset Preview (Everfall)",
   "description": "Preview and edit GTA V assets in VS Code: 3D models (.ydr/.ydd/.yft), textures (.ytd), archetypes and MLO interiors (.ytyp), maps (.ymap), collisions (.ybn), ped clothing (.ymt) and animations (.ycd). Includes a FiveM resource health check, batch texture optimiser and asset browser. Pure TypeScript \u2014 works on Windows, macOS, Linux and vscode.dev.",
   "icon": "media/icon.png",
   "galleryBanner": {
     "color": "#10141a",
     "theme": "dark"
   },
-  "version": "0.10.0",
-  "publisher": "ncss-ltd",
+  "version": "0.11.0",
+  "publisher": "everfall",
   "license": "GPL-3.0-only",
   "repository": {
     "type": "git",
-    "url": "https://github.com/MartinNelsonNCSS/gta_v_preview.git"
+    "url": "https://github.com/jellyton255/gta_v_preview.git"
   },
   "bugs": {
-    "url": "https://github.com/MartinNelsonNCSS/gta_v_preview/issues"
+    "url": "https://github.com/jellyton255/gta_v_preview/issues"
   },
-  "homepage": "https://github.com/MartinNelsonNCSS/gta_v_preview#readme",
+  "homepage": "https://github.com/jellyton255/gta_v_preview#readme",
   "engines": {
     "vscode": "^1.85.0"
   },
